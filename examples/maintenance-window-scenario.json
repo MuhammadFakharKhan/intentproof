@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0.0",
+  "scenario_id": "maintenance-window-baseline",
+  "description": "Independent CI workflow example: set a maintenance reminder and virtual status beacon.",
+  "warranty": {
+    "schema_version": "1.0.0",
+    "warranty_id": "maintenance-window-v1",
+    "routine_id": "maintenance-window",
+    "name": "Maintenance Window",
+    "aliases": ["maintenance window"],
+    "steps": [
+      {"step_id": "set-window-reminder", "operation": "SET_ALARM", "target": "deployment_reminder", "field": "starts_at", "value": "22:00", "risk": "low", "requires_approval": false},
+      {"step_id": "enable-status-beacon", "operation": "LIGHT_ON", "target": "maintenance_status", "field": "active", "value": true, "risk": "low", "requires_approval": false}
+    ],
+    "postconditions": [
+      {"target": "deployment_reminder", "field": "starts_at", "equals": "22:00"},
+      {"target": "maintenance_status", "field": "active", "equals": true}
+    ],
+    "forbidden_operations": ["UNLOCK"],
+    "recovery": {"auto_retry_operations": ["LIGHT_ON"], "max_auto_retries": 1, "sensitive_retry_requires_approval": true},
+    "verification": {"require_readback": true, "unknown_is_success": false}
+  },
+  "initial_state": {
+    "deployment_reminder": {"starts_at": null},
+    "maintenance_status": {"active": false}
+  },
+  "approvals": [],
+  "seed": 7,
+  "faults": [],
+  "expected": {"workflow_outcome": "VERIFIED", "violations": []}
+}
