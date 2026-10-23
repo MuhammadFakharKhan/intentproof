@@ -8,7 +8,7 @@ from collections import defaultdict
 SUPPORTED_OPERATIONS = {"LIGHT_ON", "LIGHT_OFF", "LOCK", "UNLOCK", "SET_ALARM"}
 SUPPORTED_FAULTS = {
     "ack_without_effect", "readback_unavailable", "permission_revoked",
-    "timeout_after_commit", "partial_rollback",
+    "timeout_after_commit", "partial_rollback", "unexpected_side_effect",
 }
 SUPPORTED_OUTCOMES = {"VERIFIED", "DEGRADED", "UNVERIFIED", "RECOVERED", "CANCELLED"}
 
@@ -86,6 +86,7 @@ def _validate(scenario):
     _require_object(
         warranty, "warranty",
         {"schema_version", "warranty_id", "routine_id", "name", "aliases", "steps", "postconditions", "forbidden_operations", "recovery", "verification"},
+        {"invariants", "warranty_version", "side_effect_candidates", "unchanged_fields"},
     )
     if warranty["schema_version"] != "1.0.0":
         _fail("Warranty schema_version must be 1.0.0")
@@ -117,7 +118,7 @@ def _validate(scenario):
     if len(ids) != len(set(ids)):
         _fail("Duplicate step IDs")
 
-    postconditions = warranty["postconditions"]
+    postconditions = warranty["postconditions"] + warranty.get("invariants", [])
     if not isinstance(postconditions, list) or not postconditions:
         _fail("warranty.postconditions must be a non-empty array")
     if len(postconditions) > MAX_POSTCONDITIONS:
@@ -140,6 +141,15 @@ def _validate(scenario):
     if verification["require_readback"] is not True or verification["unknown_is_success"] is not False:
         _fail("warranty verification must require readback and treat unknown as non-success")
 
+    for label in ("side_effect_candidates", "unchanged_fields"):
+        values = warranty.get(label, [])
+        if not isinstance(values, list) or len(values) > 100:
+            _fail(f"warranty.{label} must be an array of at most 100")
+        for i, item in enumerate(values):
+            keys = {"target", "field", "baseline"} if label == "side_effect_candidates" else {"target", "field"}
+            _require_object(item, f"warranty.{label}[{i}]", keys)
+            _require_string(item["target"], f"warranty.{label}[{i}].target")
+            _require_string(item["field"], f"warranty.{label}[{i}].field")
     faults = scenario["faults"]
     if not isinstance(faults, list):
         _fail("faults must be an array")
@@ -152,6 +162,8 @@ def _validate(scenario):
             _fail("Unrecognized fault " + str(fault["kind"]))
         if fault["at_step_id"] not in ids:
             _fail("Fault references missing step " + fault["at_step_id"])
+        if fault["kind"] == "unexpected_side_effect" and not warranty.get("side_effect_candidates"):
+            _fail("unexpected_side_effect requires a side-effect candidate")
         if not _is_int(fault["occurrences"]) or fault["occurrences"] < 1:
             _fail("Fault occurrences must be a positive integer")
 
@@ -190,7 +202,7 @@ def run_scenario(scenario):
     auto_retry = set(recovery.get("auto_retry_operations", []))
 
     def take_fault(step_id):
-        for kind in ("permission_revoked", "ack_without_effect", "timeout_after_commit", "readback_unavailable", "partial_rollback"):
+        for kind in ("permission_revoked", "ack_without_effect", "timeout_after_commit", "readback_unavailable", "partial_rollback", "unexpected_side_effect"):
             key = (step_id, kind)
             if remaining_faults[key] > 0:
                 remaining_faults[key] -= 1
@@ -227,6 +239,18 @@ def run_scenario(scenario):
                 del state[target][field]
                 if not target_existed and not state[target]:
                     del state[target]
+        if fault == "unexpected_side_effect":
+            candidates = warranty.get("side_effect_candidates", [])
+            if not candidates:
+                raise ValueError("unexpected_side_effect requires a side_effect_candidates entry")
+            candidate = candidates[0]
+            extra_target, extra_field = candidate["target"], candidate["field"]
+            previous = state.get(extra_target, {}).get(extra_field, candidate.get("baseline"))
+            state.setdefault(extra_target, {})[extra_field] = (
+                not previous if isinstance(previous, bool) else
+                "off" if previous == "on" else "on" if previous == "off" else "__mutated__")
+            entry["side_effect"] = {"target": extra_target, "field": extra_field,
+                                     "before": previous, "after": state[extra_target][extra_field]}
         entry["ack"] = "TIMEOUT" if fault == "timeout_after_commit" else "SUCCESS"
         if fault == "readback_unavailable":
             unknown_fields.add((target, field))
@@ -248,7 +272,7 @@ def run_scenario(scenario):
 
     violations = []
     unknown = False
-    for p in warranty["postconditions"]:
+    for p in warranty["postconditions"] + warranty.get("invariants", []):
         target, field, expected = p["target"], p["field"], p["equals"]
         if (target, field) in unknown_fields:
             unknown = True
@@ -257,6 +281,25 @@ def run_scenario(scenario):
             observed = state.get(target, {}).get(field)
             if observed != expected:
                 violations.append({"target": target, "field": field, "expected": expected, "actual": observed})
+    protected = {(x["target"], x["field"]) for x in warranty.get("unchanged_fields", [])}
+    unwanted_changes = []
+    for target, field in sorted(protected):
+        initial_value = initial.get(target, {}).get(field)
+        actual_value = state.get(target, {}).get(field)
+        if initial_value != actual_value:
+            unwanted_changes.append({"target": target, "field": field,
+                                     "expected": initial_value, "actual": actual_value})
+    for v in unwanted_changes:
+        if v not in violations: violations.append(v)
+    allowed = {(step["target"], step["field"]) for step in warranty["steps"]}
+    observed_side_effects = []
+    for target in sorted(set(initial) | set(state)):
+        a, b = initial.get(target, {}), state.get(target, {})
+        for field in sorted(set(a) | set(b)):
+            if a.get(field) != b.get(field) and (target, field) not in allowed:
+                observed_side_effects.append({"target": target, "field": field,
+                                              "before": a.get(field), "after": b.get(field),
+                                              "contract_protected": (target, field) in protected})
     blocked = any(e["ack"] == "BLOCKED" for e in events)
     if any(v["actual"] != "UNKNOWN" for v in violations) or blocked:
         outcome = "DEGRADED"
@@ -274,4 +317,4 @@ def run_scenario(scenario):
     return {"scenario_id": scenario.get("scenario_id", "unnamed"),
             "outcome": outcome, "expected_matched": check, "retries": retries,
             "initial_state": initial, "final_state": state,
-            "violations": violations, "events": events}
+            "violations": violations, "events": events, "side_effects": observed_side_effects}

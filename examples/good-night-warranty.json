@@ -66,5 +66,18 @@
   "verification": {
     "require_readback": true,
     "unknown_is_success": false
-  }
+  },
+  "side_effect_candidates": [
+    {
+      "target": "ambient_light",
+      "field": "power",
+      "baseline": "on"
+    }
+  ],
+  "unchanged_fields": [
+    {
+      "target": "ambient_light",
+      "field": "power"
+    }
+  ]
 }

@@ -1,0 +1,17 @@
+{
+  "living_light": {
+    "power": "on"
+  },
+  "front_door": {
+    "locked": false
+  },
+  "alarm": {
+    "time": null
+  },
+  "desk_light": {
+    "power": "off"
+  },
+  "ambient_light": {
+    "power": "on"
+  }
+}

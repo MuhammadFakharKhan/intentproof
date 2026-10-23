@@ -1,11 +1,11 @@
-# Coding Agent Instructions — IntentProof
+# Coding-agent rules for this repository
 
-1. This is an independent open-source developer library; never import `routine-rescue-ai` or require Alexa accounts.
-2. Preserve portable scenario schema v1.0.0, explicit approval gates and outcome semantics.
-3. Do not treat ACK as postcondition verification, and never report an unavailable readback as success.
-4. Keep fault injection synthetic, deterministic and confined to copied in-memory state.
-5. No eval/exec, dynamic code loading, untrusted API invocation or arbitrary file writes from scenario payloads.
-6. Add unit tests and README examples for each new feature.
-7. Do not claim true rollback or compensating transactions until implemented.
-8. Keep package useful beyond RoutineRescue with independent examples.
-9. Before submission read `docs/rule.md` and verify license, public repository and contribution evidence.
+1. Preserve the public v1 test scenario format and the v2 synthetic incident exchange format unless explicitly versioning them.
+2. Never claim live Amazon Alexa+, device integration, physical safety, or authenticated MCP access. This is a local simulation and a separate developer toolkit.
+3. Run all unit tests before proposing a release. Re-run the combined-package HTTP/CLI integration test when changing the exchange contract.
+4. Never execute remote tool code, fetch untrusted endpoints, or expose credentials through the simulator.
+5. Maintain mandatory approval for simulated LOCK; never enable UNLOCK in the local builder.
+6. Return `UNVERIFIED` when observation is unavailable; action acknowledgements alone are not proofs of success.
+7. Mutation coverage is bounded by modeled fields; include inventory fields where available and explain blind spots.
+8. Do not silently weaken contract postconditions, invariants, unchanged-field guards, forbidden operations or approval requirements.
+9. Separate RoutineRescue AI and IntentProof source repositories: integration is via documented JSON evidence contracts, not shared mutable internals.
